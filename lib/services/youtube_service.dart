@@ -5,6 +5,8 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
+import 'package:image_gallery_saver_plus/image_gallery_saver_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class YouTubeService {
   final YoutubeExplode _yt = YoutubeExplode();
@@ -192,6 +194,11 @@ class YouTubeService {
         print('[YouTubeService] FFmpegKit merge complete: $outputPath');
         await videoFile.delete();
         await audioFile.delete();
+        final location = await getDownloadLocationSetting();
+        if (location == 'gallery') {
+          final result = await ImageGallerySaverPlus.saveFile(outputPath, isReturnPathOfIOS: true);
+          print('[YouTubeService] Saved merged video to gallery: $result');
+        }
         return outputPath;
       } else {
         print('[YouTubeService] FFmpegKit failed: $returnCode');
@@ -210,4 +217,14 @@ class YouTubeService {
   void dispose() {
     _yt.close();
   }
-} 
+}
+
+Future<String> getDownloadLocationSetting() async {
+  final prefs = await SharedPreferences.getInstance();
+  return prefs.getString('download_location') ?? 'app_folder'; // 'app_folder' or 'gallery'
+}
+
+Future<void> setDownloadLocationSetting(String location) async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setString('download_location', location);
+}

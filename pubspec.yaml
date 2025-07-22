@@ -18,12 +18,13 @@ dependencies:
   permission_handler: ^12.0.1
   provider: ^6.1.2
   just_audio: ^0.10.4
-  shared_preferences: ^2.5.3
+  shared_preferences: ^2.2.2
   http: ^1.2.1
   webview_flutter: ^4.7.0
   downloads_path_provider_28: ^0.1.2
   device_info_plus: ^11.5.0
   ffmpeg_kit_flutter_new: ^2.0.0
+  image_gallery_saver_plus: ^4.0.1
 
 dev_dependencies:
   flutter_test:
