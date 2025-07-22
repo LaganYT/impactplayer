@@ -203,20 +203,71 @@ class _OnlineScreenState extends State<OnlineScreen> {
                                             builder: (context) => const Center(child: CircularProgressIndicator()),
                                           );
                                           try {
+                                            print('[ImpactStream] Fetching streaming links for type: $type, id: ${item['id']}');
                                             final links = await _impactService.getStreamingLinks(type, item['id'].toString());
+                                            print('[ImpactStream] Links returned: ' + links.toString());
                                             if (context.mounted) Navigator.pop(context);
                                             if (links.isNotEmpty) {
-                                              final firstLink = links[0]['embedUrl'] as String;
-                                              Navigator.push(
-                                                context,
-                                                MaterialPageRoute(
-                                                  builder: (context) => PlayerScreen.web(
-                                                    streamUrl: firstLink,
-                                                    title: title,
-                                                  ),
-                                                ),
-                                              );
+                                              var allowedUrls = links
+                                                  .map<String?>((l) => l['embedUrl'] as String?)
+                                                  .where((u) => u != null && (u.startsWith('http://') || u.startsWith('https://')) && u.trim().isNotEmpty)
+                                                  .cast<String>()
+                                                  .toList();
+                                              // Add vidsrc.net variant if any vidsrc.* domain is present
+                                              final netVariants = allowedUrls
+                                                .where((url) => url.contains('vidsrc.') && !url.contains('vidsrc.net'))
+                                                .map((url) {
+                                                  // Replace any vidsrc.<tld> with vidsrc.net
+                                                  final netUrl = url.replaceFirst(RegExp(r'vidsrc\.[^/]+'), 'vidsrc.net');
+                                                  return (netUrl.startsWith('http://') || netUrl.startsWith('https://')) ? netUrl : null;
+                                                })
+                                                .where((url) => url != null && !allowedUrls.contains(url))
+                                                .cast<String>()
+                                                .toList();
+                                              allowedUrls.addAll(netVariants);
+                                              // Always allow cloudnestra.com
+                                              if (!allowedUrls.contains('cloudnestra.com')) {
+                                                allowedUrls.add('https://cloudnestra.com');
+                                              }
+                                              // Always allow cloudnestra.com
+                                              if (!allowedUrls.contains('cloudnestra.com')) {
+                                                allowedUrls.add('http://cloudnestra.com');
+                                              }
+                                              final firstLink = allowedUrls.isNotEmpty ? allowedUrls.first : null;
+                                              print('[ImpactStream] Final allowedUrls: $allowedUrls');
+                                              print('[ImpactStream] Chosen firstLink: $firstLink');
+                                              if (firstLink != null) {
+                                                try {
+                                                  print('[ImpactStream] About to push PlayerScreen.web with firstLink: $firstLink and allowedUrls: $allowedUrls');
+                                                  Navigator.push(
+                                                    context,
+                                                    MaterialPageRoute(
+                                                      builder: (context) => PlayerScreen.web(
+                                                        streamUrl: firstLink,
+                                                        title: title,
+                                                        allowedUrls: allowedUrls,
+                                                      ),
+                                                    ),
+                                                  );
+                                                  print('[ImpactStream] Successfully pushed PlayerScreen.web');
+                                                } catch (navErr) {
+                                                  print('[ImpactStream] Error during navigation to PlayerScreen.web: $navErr');
+                                                  if (context.mounted) {
+                                                    ScaffoldMessenger.of(context).showSnackBar(
+                                                      SnackBar(content: Text('Navigation error: $navErr')),
+                                                    );
+                                                  }
+                                                }
+                                              } else {
+                                                print('[ImpactStream] No valid streaming link found after filtering.');
+                                                if (context.mounted) {
+                                                  ScaffoldMessenger.of(context).showSnackBar(
+                                                    const SnackBar(content: Text('Invalid or unavailable streaming link.')),
+                                                  );
+                                                }
+                                              }
                                             } else {
+                                              print('[ImpactStream] No streaming links found.');
                                               if (context.mounted) {
                                                 ScaffoldMessenger.of(context).showSnackBar(
                                                   const SnackBar(content: Text('No streaming links found.')),
@@ -224,6 +275,7 @@ class _OnlineScreenState extends State<OnlineScreen> {
                                               }
                                             }
                                           } catch (e) {
+                                            print('[ImpactStream] Error fetching streaming links: $e');
                                             if (context.mounted) Navigator.pop(context);
                                             if (context.mounted) {
                                               ScaffoldMessenger.of(context).showSnackBar(
