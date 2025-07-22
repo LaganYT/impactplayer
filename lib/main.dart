@@ -5,10 +5,20 @@ import 'package:provider/provider.dart';
 import 'package:flutter/services.dart';
 import 'providers/video_queue_provider.dart';
 import 'providers/theme_provider.dart';
+import 'providers/download_provider.dart';
 import 'screens/home_screen.dart';
 
 void main() {
-  runApp(const ImpactPlayerApp());
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => DownloadProvider()),
+        ChangeNotifierProvider(create: (_) => VideoQueueProvider()),
+        ChangeNotifierProvider(create: (_) => ThemeProvider()),
+      ],
+      child: const ImpactPlayerApp(),
+    ),
+  );
 }
 
 class ImpactPlayerApp extends StatelessWidget {

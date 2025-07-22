@@ -7,6 +7,8 @@ import 'package:provider/provider.dart';
 import '../providers/video_queue_provider.dart';
 import 'dart:io';
 import '../models/video_item.dart';
+import '../providers/download_provider.dart';
+import '../models/download_item.dart';
 
 class OnlineScreen extends StatefulWidget {
   const OnlineScreen({super.key});
@@ -63,6 +65,7 @@ class _OnlineScreenState extends State<OnlineScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final rootContext = context; // This context will remain valid
     return SafeArea(
       child: Column(
         children: [
@@ -142,7 +145,7 @@ class _OnlineScreenState extends State<OnlineScreen> {
                                         onTap: () async {
                                           Navigator.pop(context);
                                           Navigator.push(
-                                            context,
+                                            rootContext,
                                             MaterialPageRoute(
                                               builder: (context) => PlayerScreen.web(
                                                 streamUrl: 'https://www.youtube.com/watch?v=${video.id.value}',
@@ -157,11 +160,129 @@ class _OnlineScreenState extends State<OnlineScreen> {
                                         title: const Text('Download'),
                                         onTap: () async {
                                           Navigator.pop(context);
-                                          final path = await _youtubeService.downloadVideo(video);
-                                          if (context.mounted) {
-                                            ScaffoldMessenger.of(context).showSnackBar(
-                                              SnackBar(content: Text(path != null ? 'Downloaded to $path' : 'Download failed.')),
+                                          final downloadProvider = Provider.of<DownloadProvider>(rootContext, listen: false);
+                                          final downloadItem = DownloadItem(
+                                            title: video.title,
+                                            source: 'YouTube',
+                                            progress: 0.0,
+                                            isCompleted: false,
+                                            isError: false,
+                                          );
+                                          downloadProvider.addDownload(downloadItem);
+                                          final downloadIndex = downloadProvider.downloads.length - 1;
+                                          // Try muxed download first
+                                          final manifest = await _youtubeService.getManifest(video);
+                                          if (manifest.muxed.isNotEmpty) {
+                                            final path = await _youtubeService.downloadVideo(
+                                              video,
+                                              onProgress: (progress) {
+                                                downloadProvider.updateDownload(
+                                                  downloadIndex,
+                                                  downloadProvider.downloads[downloadIndex].copyWith(progress: progress),
+                                                );
+                                              },
                                             );
+                                            if (rootContext.mounted) {
+                                              if (path != null) {
+                                                downloadProvider.updateDownload(
+                                                  downloadIndex,
+                                                  downloadProvider.downloads[downloadIndex].copyWith(
+                                                    filePath: path,
+                                                    progress: 1.0,
+                                                    isCompleted: true,
+                                                  ),
+                                                );
+                                                ScaffoldMessenger.of(rootContext).showSnackBar(
+                                                  SnackBar(content: Text('Downloaded to $path')),
+                                                );
+                                              } else {
+                                                downloadProvider.updateDownload(
+                                                  downloadIndex,
+                                                  downloadProvider.downloads[downloadIndex].copyWith(
+                                                    isError: true,
+                                                    errorMessage: 'Download failed.',
+                                                  ),
+                                                );
+                                                ScaffoldMessenger.of(rootContext).showSnackBar(
+                                                  const SnackBar(content: Text('Download failed.')),
+                                                );
+                                              }
+                                            }
+                                          } else {
+                                            // No muxed, prompt for video quality
+                                            final qualities = await _youtubeService.getVideoQualities(video);
+                                            if (qualities.isEmpty) {
+                                              if (rootContext.mounted) {
+                                                downloadProvider.updateDownload(
+                                                  downloadIndex,
+                                                  downloadProvider.downloads[downloadIndex].copyWith(
+                                                    isError: true,
+                                                    errorMessage: 'No downloadable video streams.',
+                                                  ),
+                                                );
+                                                ScaffoldMessenger.of(rootContext).showSnackBar(
+                                                  const SnackBar(content: Text('No downloadable video streams.')),
+                                                );
+                                              }
+                                              return;
+                                            }
+                                            final selected = await showDialog<VideoStreamInfo>(
+                                              context: rootContext,
+                                              builder: (context) => SimpleDialog(
+                                                title: const Text('Select Video Quality'),
+                                                children: qualities.map((q) => SimpleDialogOption(
+                                                  onPressed: () => Navigator.pop(context, q),
+                                                  child: Text('${q.qualityLabel} (${(q.size.totalMegaBytes).toStringAsFixed(2)} MB)'),
+                                                )).toList(),
+                                              ),
+                                            );
+                                            if (selected == null) {
+                                              // User cancelled
+                                              downloadProvider.updateDownload(
+                                                downloadIndex,
+                                                downloadProvider.downloads[downloadIndex].copyWith(
+                                                  isError: true,
+                                                  errorMessage: 'Download cancelled.',
+                                                ),
+                                              );
+                                              return;
+                                            }
+                                            final path = await _youtubeService.downloadAndMergeVideo(
+                                              video,
+                                              selected,
+                                              onProgress: (progress) {
+                                                downloadProvider.updateDownload(
+                                                  downloadIndex,
+                                                  downloadProvider.downloads[downloadIndex].copyWith(progress: progress),
+                                                );
+                                              },
+                                            );
+                                            if (rootContext.mounted) {
+                                              if (path != null) {
+                                                downloadProvider.updateDownload(
+                                                  downloadIndex,
+                                                  downloadProvider.downloads[downloadIndex].copyWith(
+                                                    filePath: path,
+                                                    progress: 1.0,
+                                                    isCompleted: true,
+                                                  ),
+                                                );
+                                                ScaffoldMessenger.of(rootContext).showSnackBar(
+                                                  SnackBar(content: Text('Downloaded to $path')),
+                                                );
+                                              } else {
+                                                downloadProvider.updateDownload(
+                                                  downloadIndex,
+                                                  downloadProvider.downloads[downloadIndex].copyWith(
+                                                    isError: true,
+                                                    errorMessage: 'Download failed.',
+                                                  ),
+                                                );
+                                                ScaffoldMessenger.of(rootContext).showSnackBar(
+                                                  const SnackBar(content: Text('Download failed.')),
+                                                );
+                                              }
+                                            }
                                           }
                                         },
                                       ),
@@ -324,6 +445,17 @@ class _OnlineScreenState extends State<OnlineScreen> {
                                         title: const Text('Download'),
                                         onTap: () async {
                                           Navigator.pop(context);
+                                          final downloadProvider = Provider.of<DownloadProvider>(context, listen: false);
+                                          // Add a DownloadItem for Impact Stream
+                                          final downloadItem = DownloadItem(
+                                            title: title,
+                                            source: 'Impact Stream',
+                                            progress: 0.0,
+                                            isCompleted: false,
+                                            isError: false,
+                                          );
+                                          downloadProvider.addDownload(downloadItem);
+                                          final downloadIndex = downloadProvider.downloads.length - 1;
                                           showDialog(
                                             context: context,
                                             barrierDismissible: false,
@@ -333,19 +465,64 @@ class _OnlineScreenState extends State<OnlineScreen> {
                                             final links = await _impactService.getStreamingLinks(type, item['id'].toString());
                                             if (context.mounted) Navigator.pop(context);
                                             if (links.isNotEmpty) {
-                                              final firstLink = links[0]['embedUrl'] as String;
-                                              // Save the embed URL as a .txt file (stub for real download)
-                                              final dir = Directory.systemTemp;
-                                              final filePath = '${dir.path}/$title-${item['id']}.m3u8.txt';
-                                              final file = File(filePath);
-                                              await file.writeAsString(firstLink);
+                                              // Try to find a direct mp4 or m3u8 link
+                                              String? directUrl;
+                                              for (final link in links) {
+                                                final url = link['embedUrl'] as String?;
+                                                if (url != null && (url.endsWith('.mp4') || url.endsWith('.m3u8'))) {
+                                                  directUrl = url;
+                                                  break;
+                                                }
+                                              }
+                                              String? filePath;
+                                              if (directUrl != null) {
+                                                filePath = await _impactService.downloadDirectVideo(directUrl, title);
+                                              } else {
+                                                // Fallback: save the first embed URL as a .txt file
+                                                final firstLink = links[0]['embedUrl'] as String?;
+                                                if (firstLink != null) {
+                                                  final dir = Directory.systemTemp;
+                                                  final filePathTxt = '${dir.path}/$title-${item['id']}.m3u8.txt';
+                                                  final file = File(filePathTxt);
+                                                  await file.writeAsString(firstLink);
+                                                  filePath = filePathTxt;
+                                                }
+                                              }
                                               if (context.mounted) {
-                                                ScaffoldMessenger.of(context).showSnackBar(
-                                                  SnackBar(content: Text('Download link saved: $filePath')),
-                                                );
+                                                if (filePath != null) {
+                                                  downloadProvider.updateDownload(
+                                                    downloadIndex,
+                                                    downloadProvider.downloads[downloadIndex].copyWith(
+                                                      filePath: filePath,
+                                                      progress: 1.0,
+                                                      isCompleted: true,
+                                                    ),
+                                                  );
+                                                  ScaffoldMessenger.of(context).showSnackBar(
+                                                    SnackBar(content: Text('Downloaded to $filePath')),
+                                                  );
+                                                } else {
+                                                  downloadProvider.updateDownload(
+                                                    downloadIndex,
+                                                    downloadProvider.downloads[downloadIndex].copyWith(
+                                                      isError: true,
+                                                      errorMessage: 'Download failed.',
+                                                    ),
+                                                  );
+                                                  ScaffoldMessenger.of(context).showSnackBar(
+                                                    const SnackBar(content: Text('Download failed.')),
+                                                  );
+                                                }
                                               }
                                             } else {
                                               if (context.mounted) {
+                                                downloadProvider.updateDownload(
+                                                  downloadIndex,
+                                                  downloadProvider.downloads[downloadIndex].copyWith(
+                                                    isError: true,
+                                                    errorMessage: 'No streaming links found.',
+                                                  ),
+                                                );
                                                 ScaffoldMessenger.of(context).showSnackBar(
                                                   const SnackBar(content: Text('No streaming links found.')),
                                                 );
@@ -354,6 +531,13 @@ class _OnlineScreenState extends State<OnlineScreen> {
                                           } catch (e) {
                                             if (context.mounted) Navigator.pop(context);
                                             if (context.mounted) {
+                                              downloadProvider.updateDownload(
+                                                downloadIndex,
+                                                downloadProvider.downloads[downloadIndex].copyWith(
+                                                  isError: true,
+                                                  errorMessage: 'Error: $e',
+                                                ),
+                                              );
                                               ScaffoldMessenger.of(context).showSnackBar(
                                                 SnackBar(content: Text('Error: $e')),
                                               );
